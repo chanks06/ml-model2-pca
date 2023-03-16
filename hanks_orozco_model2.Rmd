@@ -129,6 +129,11 @@ fit
 
 confusionMatrix(predict(fit, test),factor(test$churn))
 
+myRoc <- roc(test$churn, predict(fit, test, type="prob")[,2])
+
+plot(myRoc)
+auc(myRoc)
+
 ```
 
 
