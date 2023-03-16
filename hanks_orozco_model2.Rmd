@@ -57,25 +57,18 @@ summary(pr_bank)
 
 screeplot(pr_bank, type = "lines")
 ```
-
-
-
+```{r}
+pr_bank$rotation
+```
 
 ## Feature Engineering
 
 ```{r}
 # create some cool features. Make sure you add comments so I know what you are trying to accomplish!
 
-
-
-
-
-
 ```
 
-```{r}
-pr_bank$rotation
-```
+
 
 ```{r}
 rownames_to_column(as.data.frame(pr_bank$rotation)) %>% 
@@ -88,12 +81,6 @@ prc = bind_cols(select(bank3, churn), as.data.frame(pr_bank$x)) %>%
 
 #based on the graph below, "young spenders" and "old spenders" seem to be the most impactful of whether they wil churn. 
 
-
-
-```
-
-
-```{r}
 prc %>%
 pivot_longer(cols = -churn, names_to = "component", values_to = "loading") %>% mutate(churn = as.factor(churn)) %>%
 ggplot(aes(loading, fill=churn)) +
@@ -102,15 +89,21 @@ facet_grid(.~component)
 
 
 ```
+
 ```{r}
+#choosing "old_spenders" and "young_spenders" to be 2 of the 5 total features in the model: 
 prc2 = prc %>% select(young_spenders,old_spenders) 
 
-banksy = cbind(prc2, bank3) %>% select(young_spenders, old_spenders,credit_limit,total_trans_amt,avg_utilization_ratio, churn)
+#combining these features with rest of bank ds, then grabbing 3 promising variables: 
+banksy = cbind(prc2, bank3) %>% 
+            select(young_spenders, old_spenders,credit_limit,total_trans_amt,avg_utilization_ratio, churn)
+
+banksy = banksy %>% mutate(log_credit_limit = log(credit_limit)) %>% select(-credit_limit)
 
 ```
 
 
-## Specification
+## Specification: knn model 
 
 ```{r}
 # specify the model to be used (i.e. KNN, Naive Bayes, decision tree, random forest, bagged trees) and the tuning parameters used
@@ -126,9 +119,9 @@ test <- banksy[-bank_index, ]
 # example spec for rf
 fit <- train(churn ~ .,
              data = train, 
-             method = "rf",
-             ntree = 20, 
-             tuneLength = 3,
+             method = "knn",
+             preProcess = c("center","scale"),
+             tuneGrid = expand.grid(k = seq(31,41,2)),
              metric = "ROC",
              trControl = ctrl)
 
@@ -136,7 +129,6 @@ fit
 
 confusionMatrix(predict(fit, test),factor(test$churn))
 
-?trainControl()
 ```
 
 
