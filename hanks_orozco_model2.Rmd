@@ -9,6 +9,8 @@ library(tidyverse)
 library(caret)
 library(pROC)
 library(MLmetrics)
+library(fastDummies)
+library(skimr)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -16,7 +18,47 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 bank = read_rds("BankChurners.rds") 
+
+#EDA on bank 
+
+skim(bank)
+
+bank = bank %>% mutate(churn = as.factor(churn))
+
+#what percentage of customers churn? 
+bank %>% group_by(churn) %>% count() %>% mutate(freq = n/nrow(bank))
+#16% of customers churn 
+
+bank %>% filter(churn == 1) %>% ggplot(aes(x = credit_limit)) + geom_histogram(bins = 4)
+#majority of churners have credit limit under %5000, some are even negative...
+
+bank %>% group_by(churn) %>% summarize(avg_age = mean(customer_age), avg_credit_limit = mean(credit_limit), avg_total_trans_amt = mean(total_trans_amt), avg_util_ratio = mean(avg_utilization_ratio))
+#churners average credit utilization ratio is about half of the non churners...they are weening of their credit usage. 
+
+bank %>% ggplot(aes(x = total_trans_amt)) + geom_histogram(aes(fill = churn))
+#churners have generally less transaction amount 
+
+bank
+
 ```
+
+
+PCA on bank 
+```{r}
+bank = bank %>% rename_all(funs(tolower(.))) 
+
+bank = bank %>% mutate(churn = as.factor(churn))
+bank2 = bank %>% select(-churn) %>% dummy_cols(remove_selected_columns = T)
+
+bank3 = cbind(bank2, select(bank,churn))
+
+pr_bank = prcomp(x = select(bank3,-churn), scale = T, center = T)
+summary(pr_bank)
+
+screeplot(pr_bank, type = "lines")
+```
+
+
 
 
 ## Feature Engineering
@@ -27,6 +69,44 @@ bank = read_rds("BankChurners.rds")
 
 
 
+
+
+```
+
+```{r}
+pr_bank$rotation
+```
+
+```{r}
+rownames_to_column(as.data.frame(pr_bank$rotation)) %>% 
+  select(1:5) %>% 
+    filter(abs(PC1) >= 0.3 | abs(PC2) >= 0.3 | abs(PC3) >= 0.3 | abs(PC4) >= 0.3)
+
+prc = bind_cols(select(bank3, churn), as.data.frame(pr_bank$x)) %>%
+  select(1:5) %>%
+    rename("rich_men" = PC1, "cheap_men" = PC2, "young_spenders" = PC3, "old_spenders"= PC4)
+
+#based on the graph below, "young spenders" and "old spenders" seem to be the most impactful of whether they wil churn. 
+
+
+
+```
+
+
+```{r}
+prc %>%
+pivot_longer(cols = -churn, names_to = "component", values_to = "loading") %>% mutate(churn = as.factor(churn)) %>%
+ggplot(aes(loading, fill=churn)) +
+geom_density(alpha = 0.5) +
+facet_grid(.~component)
+
+
+```
+```{r}
+prc2 = prc %>% select(young_spenders,old_spenders) 
+
+banksy = cbind(prc2, bank3) %>% select(young_spenders, old_spenders,credit_limit,total_trans_amt,avg_utilization_ratio, churn)
+
 ```
 
 
@@ -36,14 +116,15 @@ bank = read_rds("BankChurners.rds")
 # specify the model to be used (i.e. KNN, Naive Bayes, decision tree, random forest, bagged trees) and the tuning parameters used
 
 ctrl <- trainControl(method = "cv", number = 3, classProbs=TRUE, summaryFunction = twoClassSummary)
+
 set.seed(504) 
 
-bank_index <- createDataPartition(banko$Churn, p = 0.80, list = FALSE)
-train <- banko[ bank_index, ]
-test <- banko[-bank_index, ]
+bank_index <- createDataPartition(banksy$churn, p = 0.80, list = FALSE)
+train <- banksy[ bank_index, ]
+test <- banksy[-bank_index, ]
 
 # example spec for rf
-fit <- train(Churn ~ .,
+fit <- train(churn ~ .,
              data = train, 
              method = "rf",
              ntree = 20, 
@@ -53,7 +134,9 @@ fit <- train(Churn ~ .,
 
 fit
 
-confusionMatrix(predict(fit, test),factor(test$Churn))
+confusionMatrix(predict(fit, test),factor(test$churn))
+
+?trainControl()
 ```
 
 
@@ -73,12 +156,12 @@ print(fit$bestTune)
 
 set.seed(1504) # I will choose a different seed for evaluation
 
-bank_index <- createDataPartition(banko$Churn, p = 0.80, list = FALSE)
-train <- banko[ bank_index, ]
-test <- banko[-bank_index, ]
+bank_index <- createDataPartition(banksy$churn, p = 0.80, list = FALSE)
+train <- banksy[ bank_index, ]
+test <- banksy[-bank_index, ]
 
 # example spec for rf
-fit_final <- train(Churn ~ .,
+fit_final <- train(churn ~ .,
              data = train, 
              method = "rf",
              tuneGrid=fit$bestTune,
@@ -86,7 +169,7 @@ fit_final <- train(Churn ~ .,
              trControl = ctrl) 
 # The last line means we will fit a model using the best tune parameters your CV found above.
 
-myRoc <- roc(test$Churn, predict(fit_final, test, type="prob")[,2])
+myRoc <- roc(test$churn, predict(fit_final, test, type="prob")[,2])
 
 plot(myRoc)
 auc(myRoc)
