@@ -1,0 +1,192 @@
+---
+title: "Principal Components Analysis"
+author: "Karol Orozco"
+date: "2023-03-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(caret)
+library(pROC)
+library(MLmetrics)
+library(fastDummies)
+library(gbm)
+library(xgboost)
+library(randomForest)
+#source('theme.R')
+
+
+bank <-readRDS(gzcon(url("https://github.com/karolo89/Raw_Data/raw/main/BankChurners.rds"))) %>%
+  mutate(Churn = Churn=="yes") %>%
+  dummy_cols(remove_selected_columns = T)
+
+```
+
+
+```{r}
+pr_bank = prcomp(x = select(bank, -Churn), scale=T, center = T)
+
+screeplot(pr_bank, type="lines")
+
+summary(pr_bank)
+
+library(ggfortify)
+
+#The autoplot( ) function of the ‘ggfortify package’ for plotting PCA:
+pr_bank.plot <- autoplot(pr_bank, data = bank,colour='Churn',  loadings = TRUE)+ theme_minimal()
+  
+pr_bank.plot
+```
+
+
+```{r}
+rownames_to_column(as.data.frame(pr_bank$rotation)) %>%
+  select(1:5) %>%
+  filter(abs(PC1) >= 0.35 | abs(PC2) >= 0.35 | abs(PC3) >= 0.35 | abs(PC4) >= 0.35)
+
+prc = bind_cols(select(bank, Churn), as.data.frame(pr_bank$x)) %>%
+  select(1:5) %>%
+  rename("Rich dudes" = PC1, "Cheap men" = PC2, "Young spenders" = PC3, "Old Spenders"= PC4)
+
+prc %>%
+  pivot_longer(cols = -Churn, names_to = "component", values_to = "loading") %>%
+  ggplot(aes(loading, fill=Churn)) + 
+  geom_density(alpha = 0.5) + 
+  facet_grid(.~component)
+
+
+```
+
+```{r}
+#churn rate baseline
+(churn.base <- bank %>% 
+  group_by(Churn) %>% 
+  count(Churn) %>% 
+  mutate(perc = n/nrow(bank) * 100) %>% 
+  rename(customers = n))
+```
+
+Our churn rate is 16%
+
+```{r}
+bank = bank %>% mutate(churn = as.factor(Churn))
+
+bank2 = bank %>% select(-Churn) 
+
+```
+
+
+```{r}
+set.seed(1234)
+index<-createDataPartition(bank2$churn,p=0.8,list=FALSE)
+train <-bank2[index,]
+test<-bank[-index,]
+
+```
+
+
+```{r}
+ctrl <- trainControl(method = "cv", number=3)
+
+fit <- train(churn ~ .,
+             data = train, 
+             method = "gbm",
+             verbose=FALSE,
+             trControl = ctrl)
+
+fit
+
+confusionMatrix(predict(fit, test),factor(test$churn))
+
+```
+
+```{r, message=F}
+
+
+variable_importance = varImp(fit$finalModel, scale=TRUE)
+
+imp = data.frame(overall = variable_importance$Overall,
+           names   = rownames(variable_importance))
+imp[order(imp$overall,decreasing = T),]
+
+print(variable_importance)
+```
+
+```{r}
+bank_varI<- bank2%>%
+  select(Total_Trans_Ct, Total_Trans_Amt, Total_Revolving_Bal, Total_Ct_Chng_Q4_Q1, Total_Relationship_Count)
+
+head(bank_varI)
+```
+```{r}
+banksy = cbind(prc, bank_varI)
+
+head(banksy)
+
+banksy <- banksy %>% mutate(churn = as.factor(Churn))%>%
+  select(-Churn)
+
+```
+
+```{r}
+set.seed(100)
+
+index<-createDataPartition(banksy$churn,p=0.8,list=FALSE)
+train <-banksy[index,]
+test<-banksy[-index,]
+
+
+ctrl <- trainControl(method = "cv", number=3)
+
+fit <- train(churn ~ .,
+             data = train, 
+             method = "gbm",
+             verbose=FALSE,
+             trControl = ctrl)
+
+fit
+```
+
+
+```{r}
+confusionMatrix(predict(fit, test),factor(test$churn))
+
+variable_importance = varImp(fit$finalModel, scale=TRUE)
+
+imp = data.frame(overall = variable_importance$Overall,
+           names   = rownames(variable_importance))
+imp[order(imp$overall,decreasing = T),]
+
+print(variable_importance)
+```
+```{r}
+bank_model <- banksy%>%
+  select(-`Young spenders`, -`Old Spenders`, -`Rich dudes`, -`Cheap men`)
+
+set.seed(1234)
+
+index<-createDataPartition(bank_model$churn,p=0.8,list=FALSE)
+train <-bank_model[index,]
+test<-bank_model[-index,]
+```
+
+
+```{r}
+ctrl <- trainControl(method = "cv", number=5)
+
+fit <- train(churn ~ .,
+             data = train, 
+             method = "gbm",
+             verbose=FALSE,
+             trControl = ctrl)
+
+fit
+confusionMatrix(predict(fit, test),factor(test$churn))
+
+
+gbm.perf(fit$finalModel)
+```
+
