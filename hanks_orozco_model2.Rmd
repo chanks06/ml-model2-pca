@@ -61,12 +61,35 @@ variables[1]
 #variables = bank %>% select(-churn) %>% colnames()
 #ggplot(bank,aes(x = sym(variables[1]))) + geom_histogram(aes(fill = churn))
 
-bank %>% ggplot(aes(x = months_inactive_12_mon)) + geom_histogram(aes(fill=churn))
+bank %>% ggplot(aes(x = customer_age)) + geom_histogram(aes(fill=churn))
 
+bank %>% filter(churn == "yes") %>% ggplot(aes(x = total_revolving_bal)) + geom_histogram(aes(fill=churn))
 
+bank %>% ggplot(aes(x = customer_age, y = total_revolving_bal)) + geom_point(aes(color = churn))
+
+#people who churn have a total revolving balance greater than 0 and less than 
+
+bank %>% mutate(trb_less_500 = (total_revolving_bal > 0) & (total_revolving_bal <=500)) %>% select(trb_less_500, churn) %>% group_by(trb_less_500, churn) %>% count()
 
 ```
 
+
+Rf model with all variables, then run Varimplot to see most impactful: 
+```{r}
+bank %>% ncol()
+
+big_model =train(churn ~ .,
+             data = bank, 
+             method = "rf",
+             tuneGrid = expand.grid(mtry = 4),
+             metric = "ROC",
+             trControl = ctrl)
+
+importance = varImp(big_model)
+
+plot(importance)
+
+```
 
 
 PCA on bank 
@@ -117,9 +140,9 @@ prc2 = prc %>% select(young_spenders,old_spenders)
 
 #combining these features with rest of bank ds, then grabbing 3 promising variables: 
 banksy = cbind(prc2, bank3) %>% 
-            select(young_spenders, old_spenders,credit_limit,total_trans_amt,avg_utilization_ratio, churn)
+            select(young_spenders, old_spenders,total_trans_ct,total_trans_amt,total_revolving_bal, churn)
 
-banksy = banksy %>% mutate(log_credit_limit = log(credit_limit)) %>% select(-credit_limit)
+#banksy = banksy %>% mutate(log_credit_limit = log(credit_limit)) %>% select(-credit_limit)
 
 ggplot(banksy, aes(x = log_credit_limit)) + geom_histogram()
 
@@ -161,11 +184,10 @@ auc(myRoc)
 ## Downsampling bank data to remove imbalance of yes/no churn: 
 
 ```{r}
-traindown = downSample(x = train[,-5], y= train$churn) %>% mutate(churn = Class) %>% select(-Class)
-
-
+traindown = downSample(x = train[,-6], y= train$churn) %>% mutate(churn = Class) %>% select(-Class)
 traindown %>% group_by(churn) %>% count()
 ```
+
 ## Random Forest Model
 
 ```{r}
@@ -208,7 +230,7 @@ test <- banksy[-bank_index, ]
 
 # example spec for rf
 fit_final <- train(churn ~ .,
-             data = train, 
+             data = traindown, 
              method = "rf",
              tuneGrid=fit$bestTune,
              metric = "ROC",
