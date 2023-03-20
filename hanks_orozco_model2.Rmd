@@ -4,6 +4,7 @@ author: "Karol Orozco & Charles Hanks"
 output: html_document
 ---
 
+
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(caret)
@@ -18,6 +19,12 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 bank = read_rds("BankChurners.rds") 
+
+bank = bank %>% rename_all(funs(tolower(.))) 
+
+skim(bank)
+
+
 
 #EDA on bank 
 
@@ -38,14 +45,33 @@ bank %>% group_by(churn) %>% summarize(avg_age = mean(customer_age), avg_credit_
 bank %>% ggplot(aes(x = total_trans_amt)) + geom_histogram(aes(fill = churn))
 #churners have generally less transaction amount 
 
-bank
+bank %>% filter(churn == "yes") %>% ggplot(aes(customer_age))
+
+bank %>% ggplot(aes(x = total_trans_ct)) + geom_histogram(aes(fill=churn))
+#most churners have a total_trans_ct less than 50 
+
+variables = bank %>% select(-churn) %>% colnames() 
+
+for(i in variables){
+  var = sym(i)
+  ggplot(bank,aes(x = !!var)) + geom_histogram(aes(fill = churn))
+}
+
+variables[1]
+#variables = bank %>% select(-churn) %>% colnames()
+#ggplot(bank,aes(x = sym(variables[1]))) + geom_histogram(aes(fill = churn))
+
+bank %>% ggplot(aes(x = months_inactive_12_mon)) + geom_histogram(aes(fill=churn))
+
+
 
 ```
 
 
+
 PCA on bank 
 ```{r}
-bank = bank %>% rename_all(funs(tolower(.))) 
+
 
 bank = bank %>% mutate(churn = as.factor(churn))
 bank2 = bank %>% select(-churn) %>% dummy_cols(remove_selected_columns = T)
@@ -63,12 +89,7 @@ pr_bank$rotation
 
 ## Feature Engineering
 
-```{r}
-# create some cool features. Make sure you add comments so I know what you are trying to accomplish!
-
-```
-
-
+PCA 
 
 ```{r}
 rownames_to_column(as.data.frame(pr_bank$rotation)) %>% 
@@ -99,6 +120,8 @@ banksy = cbind(prc2, bank3) %>%
             select(young_spenders, old_spenders,credit_limit,total_trans_amt,avg_utilization_ratio, churn)
 
 banksy = banksy %>% mutate(log_credit_limit = log(credit_limit)) %>% select(-credit_limit)
+
+ggplot(banksy, aes(x = log_credit_limit)) + geom_histogram()
 
 ```
 
@@ -133,6 +156,32 @@ myRoc <- roc(test$churn, predict(fit, test, type="prob")[,2])
 
 plot(myRoc)
 auc(myRoc)
+
+```
+## Downsampling bank data to remove imbalance of yes/no churn: 
+
+```{r}
+traindown = downSample(x = train[,-5], y= train$churn) %>% mutate(churn = Class) %>% select(-Class)
+
+
+traindown %>% group_by(churn) %>% count()
+```
+## Random Forest Model
+
+```{r}
+fit <- train(churn ~ .,
+             data = traindown, 
+             method = "rf",
+             tuneLength = 4, 
+             metric = "ROC",
+             trControl = ctrl)
+
+confusionMatrix(predict(fit, test),factor(test$churn))
+
+myRoc <- roc(test$churn, predict(fit, test, type="prob")[,2])
+
+plot(myRoc)
+auc(myRoc) 
 
 ```
 
